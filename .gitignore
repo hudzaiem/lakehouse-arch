@@ -1,0 +1,8 @@
+# Environment
+.env.lakehouse
+.env
+# Flink JARs (downloaded, not committed)
+flink/lib/*.jar
+
+# OS
+.DS_Store

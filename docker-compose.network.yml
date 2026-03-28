@@ -1,0 +1,19 @@
+# ================================================================
+# Network Override — Kafka lokal (compose terpisah, 1 VM)
+# ================================================================
+# Gunakan file ini HANYA jika Kafka berjalan di Docker Compose
+# terpisah di VM yang sama.
+#
+# Cari nama network Kafka:
+#   docker network ls | grep kafka
+#
+# Usage:
+#   docker compose \
+#     -f docker-compose.lakehouse.yml \
+#     -f docker-compose.network.yml \
+#     --env-file .env.lakehouse up -d
+
+networks:
+  default:
+    external: true
+    name: ${KAFKA_DOCKER_NETWORK:-kafka-boilerplate_default}
