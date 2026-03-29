@@ -41,12 +41,12 @@ chmod +x flink/download-jars.sh
 ### 2. Setup environment
 
 ```bash
-cp .env.lakehouse.example .env.lakehouse
-# Edit .env.lakehouse:
+cp .env.example .env
+# Edit .env:
 #   - Paste GCS_CREDENTIALS_JSON (full JSON, single line)
 #   - Set GCS_BUCKET
 #   - Kafka remote: set KAFKA_BOOTSTRAP_SERVERS, KAFKA_SECURITY_PROTOCOL,
-#     KAFKA_SASL_USERNAME, KAFKA_SASL_PASSWORD
+#     KAFKA_SASL_MECHANISM, KAFKA_SASL_USERNAME, KAFKA_SASL_PASSWORD
 #   - Kafka lokal: default sudah benar (PLAINTEXT, no auth)
 ```
 
@@ -54,13 +54,13 @@ cp .env.lakehouse.example .env.lakehouse
 
 ```bash
 # Kafka REMOTE (default)
-docker compose -f docker-compose.lakehouse.yml --env-file .env.lakehouse up -d
+docker compose -f docker-compose.lakehouse.yml --env-file .env up -d
 
 # Kafka LOKAL (compose terpisah, 1 VM)
 docker compose \
   -f docker-compose.lakehouse.yml \
   -f docker-compose.network.yml \
-  --env-file .env.lakehouse up -d
+  --env-file .env up -d
 ```
 
 ### 4. Verify services
@@ -84,16 +84,15 @@ open http://localhost:8585    # admin / admin
 ### 5. Run Flink SQL jobs
 
 ```bash
-# Open Flink SQL CLI
-docker exec -it flink-jobmanager ./bin/sql-client.sh
+# Submit batch job untuk katalog dan bronze layer:
+docker exec -it flink-jobmanager ./bin/sql-client.sh -i /tmp/sql/01-create-catalogs.sql -f /tmp/sql/02-bronze-ingest.sql
 
-# Di dalam SQL CLI, jalankan berurutan:
-#   1. source /opt/flink/sql/01-create-catalogs.sql
-#   2. source /opt/flink/sql/02-bronze-ingest.sql   (streaming job)
-#   3. source /opt/flink/sql/04-gold-ohlcv.sql       (streaming job)
-#
-# Silver (batch dedup) bisa dijalankan periodik:
-#   4. source /opt/flink/sql/03-silver-clean.sql
+# Jika ingin lanjut eksplorasi di Flink SQL CLI secara interaktif:
+docker exec -it flink-jobmanager ./bin/sql-client.sh -i /tmp/sql/01-create-catalogs.sql
+
+# Di dalam SQL CLI, eksekusi silver & gold (streaming lanjutan):
+# Flink SQL> source '/tmp/sql/03-silver-clean.sql';
+# Flink SQL> source '/tmp/sql/04-gold-ohlcv.sql';
 ```
 
 ### 6. Query data via Trino
@@ -116,11 +115,11 @@ SELECT * FROM iceberg.gold.stock_ohlcv_1m LIMIT 10;
 | Flink JobManager | 768 MB | 0.25 |
 | Flink TaskManager | 1.5 GB | 0.40 |
 | Trino | 1 GB | 0.30 |
-| OpenMetadata | 1 GB | 0.25 |
-| MySQL (OM) | 256 MB | 0.15 |
-| Elasticsearch (OM) | 768 MB | 0.25 |
+| OpenMetadata | 1.5 GB | 0.75 |
+| MySQL (OM) | 384 MB | 0.50 |
+| Elasticsearch (OM) | 1 GB | 0.75 |
 | OM Ingestion | 384 MB | 0.15 |
-| **Total** | **~5.9 GB** | **~1.9** |
+| **Total** | **~6.9 GB** | **~3.25** |
 
 > **Note**: Jika Kafka berjalan di compose terpisah di VM yang sama, tambahkan
 > `-f docker-compose.network.yml` saat start. Jika Kafka remote, cukup pakai compose utama saja.
@@ -131,7 +130,7 @@ SELECT * FROM iceberg.gold.stock_ohlcv_1m LIMIT 10;
 stock-lakehouse/
 ├── docker-compose.lakehouse.yml
 ├── docker-compose.network.yml    # Optional: join Kafka network lokal
-├── .env.lakehouse.example
+├── .env.example
 ├── flink/
 │   ├── entrypoint.sh           # GCS credentials + SQL envsubst
 │   ├── download-jars.sh        # Download Flink dependencies
@@ -152,14 +151,14 @@ stock-lakehouse/
 
 ```bash
 # Kafka remote
-docker compose -f docker-compose.lakehouse.yml --env-file .env.lakehouse down
+docker compose -f docker-compose.lakehouse.yml --env-file .env down
 
 # Kafka lokal (sama seperti saat start)
 docker compose \
   -f docker-compose.lakehouse.yml \
   -f docker-compose.network.yml \
-  --env-file .env.lakehouse down
+  --env-file .env down
 
 # Remove volumes too (tambah -v):
-docker compose -f docker-compose.lakehouse.yml --env-file .env.lakehouse down -v
+docker compose -f docker-compose.lakehouse.yml --env-file .env down -v
 ```
