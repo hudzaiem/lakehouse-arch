@@ -1,6 +1,8 @@
 
 x-gcs-env: &gcs-env
   GCS_CREDENTIALS_JSON: ${GCS_CREDENTIALS_JSON}
+  GCS_BUCKET: ${GCS_BUCKET}
+  GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcs-key.json
 
 services:
   # ----------------------------------------------------------------
@@ -16,13 +18,14 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 384M
           cpus: '0.15'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:19120/api/v2/config"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 120s
 
   # ----------------------------------------------------------------
   # STREAM PROCESSING — Apache Flink
@@ -30,28 +33,29 @@ services:
   flink-jobmanager:
     image: flink:1.20-java17
     container_name: flink-jobmanager
+    hostname: flink-jobmanager
     ports:
       - "8081:8081"
-    command: jobmanager
     environment:
       <<: *gcs-env
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka-1:29092,kafka-2:29092,kafka-3:29092}
       KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
       KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-SCRAM-SHA-256}
-      KAFKA_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.scram.ScramLoginModule required username="${KAFKA_SASL_USERNAME}" password="${KAFKA_SASL_PASSWORD}";'
+      KAFKA_SASL_JAAS_CONFIG: 'org.apache.flink.kafka.shaded.org.apache.kafka.common.security.scram.ScramLoginModule required username="${KAFKA_SASL_USERNAME}" password="${KAFKA_SASL_PASSWORD}";'
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-stock-stream}
+      JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
       FLINK_PROPERTIES: |
-        jobmanager.rpc.address: flink-jobmanager
         jobmanager.memory.process.size: 768m
         state.backend.type: hashmap
-        state.checkpoints.dir: s3://${GCS_BUCKET}/checkpoints
+        state.checkpoints.dir: gs://${GCS_BUCKET}/checkpoints
         execution.checkpointing.interval: 60000
-        s3.endpoint: https://storage.googleapis.com
-        s3.path.style.access: false
+        fs.allowed-fallback-filesystems: gs
     volumes:
       - ./flink/lib:/opt/flink/lib/custom
       - ./flink/sql:/opt/flink/sql
       - ./flink/entrypoint.sh:/opt/flink/entrypoint-gcs.sh:ro
-    entrypoint: ["/bin/bash", "/opt/flink/entrypoint-gcs.sh", "jobmanager"]
+    entrypoint: ["/bin/bash", "/opt/flink/entrypoint-gcs.sh"]
+    command: jobmanager
     deploy:
       resources:
         limits:
@@ -64,22 +68,21 @@ services:
   flink-taskmanager:
     image: flink:1.20-java17
     container_name: flink-taskmanager
-    command: taskmanager
     environment:
       <<: *gcs-env
+      JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
       FLINK_PROPERTIES: |
-        jobmanager.rpc.address: flink-jobmanager
         taskmanager.memory.process.size: 1536m
         taskmanager.numberOfTaskSlots: 2
         state.backend.type: hashmap
-        state.checkpoints.dir: s3://${GCS_BUCKET}/checkpoints
+        state.checkpoints.dir: gs://${GCS_BUCKET}/checkpoints
         execution.checkpointing.interval: 60000
-        s3.endpoint: https://storage.googleapis.com
-        s3.path.style.access: false
+        fs.allowed-fallback-filesystems: gs
     volumes:
       - ./flink/lib:/opt/flink/lib/custom
       - ./flink/entrypoint.sh:/opt/flink/entrypoint-gcs.sh:ro
-    entrypoint: ["/bin/bash", "/opt/flink/entrypoint-gcs.sh", "taskmanager"]
+    entrypoint: ["/bin/bash", "/opt/flink/entrypoint-gcs.sh"]
+    command: taskmanager
     deploy:
       resources:
         limits:
@@ -127,8 +130,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
-          cpus: '0.15'
+          memory: 384M
+          cpus: '0.50'
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-popenmetadata_password"]
       interval: 10s
@@ -147,13 +150,44 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
-          cpus: '0.25'
+          memory: 1G
+          cpus: '0.75'
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
+      start_period: 120s
+
+  execute-migrate-all:
+    image: docker.io/openmetadata/server:1.6.1
+    container_name: execute-migrate-all
+    command: "./bootstrap/openmetadata-ops.sh migrate"
+    environment:
+      OPENMETADATA_CLUSTER_NAME: lakehouse
+      MIGRATION_LIMIT_PARAM: 1200
+      DB_DRIVER_CLASS: com.mysql.cj.jdbc.Driver
+      DB_SCHEME: mysql
+      DB_PARAMS: "allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC"
+      DB_HOST: openmetadata-db
+      DB_PORT: 3306
+      DB_USER: openmetadata_user
+      DB_USER_PASSWORD: openmetadata_password
+      OM_DATABASE: openmetadata_db
+      SEARCH_TYPE: elasticsearch
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      ELASTICSEARCH_SCHEME: http
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.25'
+    depends_on:
+      openmetadata-db:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
 
   openmetadata:
     image: docker.io/openmetadata/server:1.6.1
@@ -163,14 +197,16 @@ services:
     environment:
       OPENMETADATA_CLUSTER_NAME: lakehouse
       SERVER_HOST_API_URL: http://openmetadata:8585/api
+      PIPELINE_SERVICE_CLIENT_ENDPOINT: http://openmetadata-ingestion:8080
       # Database
       DB_DRIVER_CLASS: com.mysql.cj.jdbc.Driver
       DB_SCHEME: mysql
+      DB_PARAMS: "allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC"
       DB_HOST: openmetadata-db
       DB_PORT: 3306
       DB_USER: openmetadata_user
       DB_USER_PASSWORD: openmetadata_password
-      DB_SCHEMA: openmetadata_db
+      OM_DATABASE: openmetadata_db
       # Elasticsearch
       SEARCH_TYPE: elasticsearch
       ELASTICSEARCH_HOST: elasticsearch
@@ -183,19 +219,21 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: '0.25'
+          memory: 1536M
+          cpus: '0.75'
     depends_on:
       openmetadata-db:
         condition: service_healthy
       elasticsearch:
         condition: service_healthy
+      execute-migrate-all:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8585/api/v1/system/version || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 15
-      start_period: 60s
+      start_period: 240s
 
   openmetadata-ingestion:
     image: docker.io/openmetadata/ingestion:1.6.1

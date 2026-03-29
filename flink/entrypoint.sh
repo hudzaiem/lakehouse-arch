@@ -22,13 +22,14 @@ if [ -d /opt/flink/lib/custom ] && [ "$(ls -A /opt/flink/lib/custom/*.jar 2>/dev
 fi
 
 # ----------------------------------------------------------------
-# Substitute env vars in SQL templates
+# Substitute env vars in SQL templates (copy to /tmp so host is untouched)
 # ----------------------------------------------------------------
 if [ -d /opt/flink/sql ]; then
+    mkdir -p /tmp/sql
     for f in /opt/flink/sql/*.sql; do
-        [ -f "$f" ] && envsubst < "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+        [ -f "$f" ] && envsubst < "$f" > "/tmp/sql/$(basename "$f")"
     done
-    echo "[entrypoint] Substituted env vars in SQL files"
+    echo "[entrypoint] Substituted env vars in SQL files → /tmp/sql/"
 fi
 
 # ----------------------------------------------------------------
