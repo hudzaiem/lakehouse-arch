@@ -2,7 +2,7 @@
 -- 02: Bronze — Raw Ingest (Kafka → Iceberg)
 -- ================================================================
 -- Kafka source → iceberg_lakehouse.bronze.stock_ticks
--- Jalankan setelah 01-create-catalogs.sql
+-- Run via:  docker exec flink-jobmanager ./bin/sql-client.sh -f /tmp/sql/02-bronze-ingest.sql
 
 USE CATALOG iceberg_lakehouse;
 USE bronze;
@@ -18,7 +18,7 @@ CREATE TEMPORARY TABLE kafka_stock_stream (
     WATERMARK FOR `event_time` AS `event_time` - INTERVAL '10' SECOND
 ) WITH (
     'connector'                      = 'kafka',
-    'topic'                          = 'stock-stream',
+    'topic'                          = '${KAFKA_TOPIC}',
     'properties.bootstrap.servers'   = '${KAFKA_BOOTSTRAP_SERVERS}',
     'properties.security.protocol'   = '${KAFKA_SECURITY_PROTOCOL}',
     'properties.sasl.mechanism'      = '${KAFKA_SASL_MECHANISM}',

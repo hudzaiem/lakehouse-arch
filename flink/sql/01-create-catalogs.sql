@@ -1,8 +1,7 @@
 -- ================================================================
 -- 01: Create Iceberg Catalog & Databases (via Nessie + GCS)
 -- ================================================================
--- Run this first in Flink SQL CLI:
---   docker exec -it flink-jobmanager ./bin/sql-client.sh
+-- Run via:  docker exec flink-jobmanager ./bin/sql-client.sh -f /tmp/sql/01-create-catalogs.sql
 
 -- Create Iceberg catalog backed by Nessie + GCS
 CREATE CATALOG iceberg_lakehouse WITH (

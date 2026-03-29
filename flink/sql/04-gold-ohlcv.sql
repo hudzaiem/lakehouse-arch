@@ -2,7 +2,7 @@
 -- 04: Gold — 1-Minute OHLCV Candles (Stream → Gold)
 -- ================================================================
 -- Real-time TUMBLE window aggregation langsung dari Kafka
--- Jalankan sebagai streaming job terpisah
+-- Run via:  docker exec flink-jobmanager ./bin/sql-client.sh -f /tmp/sql/04-gold-ohlcv.sql
 
 USE CATALOG iceberg_lakehouse;
 USE gold;
@@ -34,7 +34,7 @@ CREATE TEMPORARY TABLE kafka_stock_stream_gold (
     WATERMARK FOR `event_time` AS `event_time` - INTERVAL '10' SECOND
 ) WITH (
     'connector'                      = 'kafka',
-    'topic'                          = 'stock-stream',
+    'topic'                          = '${KAFKA_TOPIC}',
     'properties.bootstrap.servers'   = '${KAFKA_BOOTSTRAP_SERVERS}',
     'properties.security.protocol'   = '${KAFKA_SECURITY_PROTOCOL}',
     'properties.sasl.mechanism'      = '${KAFKA_SASL_MECHANISM}',
